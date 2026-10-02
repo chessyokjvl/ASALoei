@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>บันทึกการจ่ายยา ค่าย อส.</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        body { background-color: #f0f4f8; font-family: 'Sarabun', sans-serif; }
+        .container { max-width: 500px; margin-top: 30px; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.08); }
+        .header-title { text-align: center; color: #0d6efd; margin-bottom: 25px; font-weight: bold; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 10px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h3 class="header-title">💊 บันทึกการกินยา</h3>
+    
+    <form id="medForm">
+        <div class="mb-3">
+            <label class="form-label fw-bold text-primary">วันที่</label>
+            <input type="date" class="form-control" id="date" required>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-bold text-primary">มื้อยา</label>
+            <select class="form-select" id="meal" required>
+                <option value="" disabled selected>-- เลือกมื้อยา --</option>
+                <option value="เช้า">เช้า</option>
+                <option value="กลางวัน">กลางวัน</option>
+                <option value="เย็น">เย็น</option>
+                <option value="ก่อนนอน">ก่อนนอน</option>
+                <option value="ฉุกเฉิน/ตามอาการ">ฉุกเฉิน/ตามอาการ</option>
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-bold text-primary">ชื่อผู้ป่วย <span id="loadingPatients" class="loader" style="display:none;"></span></label>
+            <select class="form-select" id="patientSelect" required disabled>
+                <option value="" disabled selected>กำลังโหลดรายชื่อ...</option>
+            </select>
+            <input type="hidden" id="patientId">
+            <input type="hidden" id="patientName">
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-bold text-primary">สถานะการกินยา</label>
+            <select class="form-select" id="status" required>
+                <option value="" disabled selected>-- เลือกสถานะ --</option>
+                <option value="กินครบ">✅ กินครบ (กลืนเรียบร้อย)</option>
+                <option value="ไม่ยอมกิน">❌ ไม่ยอมกิน / คายทิ้ง</option>
+                <option value="ไม่อยู่ค่าย">⚠️ ไม่อยู่ค่าย/ลา</option>
+            </select>
+        </div>
+
+        <div class="mb-3" id="reasonDiv" style="display: none;">
+            <label class="form-label fw-bold text-danger">เหตุผล (หากไม่ได้กิน)</label>
+            <input type="text" class="form-control" id="reason" placeholder="เช่น แอบบ้วนทิ้ง, โวยวาย">
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-bold text-primary">ชื่อเจ้าหน้าที่ อส.</label>
+            <input type="text" class="form-control" id="volunteer" required>
+        </div>
+
+        <div class="mb-4">
+            <label class="form-label fw-bold text-primary">หมายเหตุ / อาการผิดปกติ</label>
+            <textarea class="form-control" id="remark" rows="2" placeholder="เช่น ซึม, อาเจียน"></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-primary w-100 fs-5 py-2" id="submitBtn">บันทึกข้อมูล</button>
+    </form>
+</div>
+
+<script>
+    // ❗️❗️ เอา URL ที่ได้จาก Google Apps Script มาใส่ตรงนี้ ❗️❗️️
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzcKbwUvgUQTUSoukq-GUWyuxEq_kYeFIl85_fUSjTA4z5jQMADutmMZxEY9fsz1xa_/exec';
+
+    // โหลดข้อมูลเมื่อเปิดหน้าเว็บ
+    document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('date').valueAsDate = new Date();
+        loadPatients();
+    });
+
+    // แสดง/ซ่อนช่องเหตุผล
+    document.getElementById('status').addEventListener('change', function() {
+        const reasonDiv = document.getElementById('reasonDiv');
+        const reasonInput = document.getElementById('reason');
+        if (this.value === 'ไม่ยอมกิน') {
+            reasonDiv.style.display = 'block';
+            reasonInput.required = true;
+        } else {
+            reasonDiv.style.display = 'none';
+            reasonInput.required = false;
+            reasonInput.value = '';
+        }
+    });
+
+    // อัปเดตค่า Hidden Field เมื่อเลือกผู้ป่วย
+    document.getElementById('patientSelect').addEventListener('change', function() {
+        const parts = this.value.split('|');
+        if(parts.length === 2) {
+            document.getElementById('patientId').value = parts[0];
+            document.getElementById('patientName').value = parts[1];
+        }
+    });
+
+    // ฟังก์ชันดึงรายชื่อผู้ป่วย (GET)
+    async function loadPatients() {
+        document.getElementById('loadingPatients').style.display = 'inline-block';
+        const select = document.getElementById('patientSelect');
+        
+        try {
+            const response = await fetch(`${APPS_SCRIPT_URL}?action=getPatients`);
+            const patients = await response.json();
+            
+            select.innerHTML = '<option value="" disabled selected>-- เลือกผู้ป่วย --</option>';
+            patients.forEach(p => {
+                let option = document.createElement('option');
+                option.value = `${p.id}|${p.name}`;
+                option.text = `${p.id} : ${p.name}`;
+                select.appendChild(option);
+            });
+            select.disabled = false;
+        } catch (error) {
+            select.innerHTML = '<option value="" disabled selected>โหลดข้อมูลล้มเหลว</option>';
+            console.error('Error fetching patients:', error);
+            Swal.fire('ข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อฐานข้อมูลได้', 'error');
+        } finally {
+            document.getElementById('loadingPatients').style.display = 'none';
+        }
+    }
+
+    // ฟังก์ชันส่งข้อมูล (POST)
+    document.getElementById('medForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const btn = document.getElementById('submitBtn');
+        btn.disabled = true;
+        btn.innerHTML = 'กำลังบันทึก...';
+
+        const payload = {
+            date: document.getElementById('date').value,
+            meal: document.getElementById('meal').value,
+            patientId: document.getElementById('patientId').value,
+            patientName: document.getElementById('patientName').value,
+            status: document.getElementById('status').value,
+            reason: document.getElementById('reason').value,
+            volunteer: document.getElementById('volunteer').value,
+            remark: document.getElementById('remark').value
+        };
+
+        try {
+            const response = await fetch(APPS_SCRIPT_URL, {
+                method: 'POST',
+                // การส่งแบบ 'text/plain' ช่วยหลีกเลี่ยงปัญหา CORS Preflight ใน Apps Script
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(payload)
+            });
+            
+            const result = await response.json();
+            
+            if(result.success) {
+                Swal.fire('สำเร็จ!', 'บันทึกการกินยาเรียบร้อยแล้ว', 'success').then(() => {
+                    // รีเซ็ตฟอร์ม (คงวันที่และชื่อ อส. ไว้)
+                    document.getElementById('patientSelect').value = '';
+                    document.getElementById('status').value = '';
+                    document.getElementById('remark').value = '';
+                    document.getElementById('status').dispatchEvent(new Event('change'));
+                });
+            } else {
+                Swal.fire('ข้อผิดพลาด', result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Error saving data:', error);
+            Swal.fire('ข้อผิดพลาด', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = 'บันทึกข้อมูล';
+        }
+    });
+</script>
+
+</body>
+</html>
